@@ -51,29 +51,51 @@ final class ShareViewController: UIViewController {
     }
 
     private func load(_ provider: NSItemProvider) {
-        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+        // Photos / videos: ask for a real file on disk.
+        for type in [UTType.image, UTType.movie] {
+            if provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                loadAsFile(provider, type: type)
+                return
+            }
+        }
+
+        // Files from the Files app. This must come before the plain `public.url`
+        // check: a file URL also conforms to `public.url`, and treating it as a
+        // link drops the file entirely.
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             group.enter()
-            provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self] item, _ in
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] item, _ in
                 defer { self?.group.leave() }
-                if let url = item as? URL, !url.isFileURL {
-                    self?.append { $0.urls.append(url.absoluteString) }
-                } else if let data = item as? Data, let string = String(data: data, encoding: .utf8) {
-                    self?.append { $0.urls.append(string) }
+                guard let self else { return }
+                var source: URL?
+                if let url = item as? URL {
+                    source = url
+                } else if let data = item as? Data {
+                    source = URL(dataRepresentation: data, relativeTo: nil)
                 }
+                guard let source, let copied = self.copyIntoGroup(source) else { return }
+                self.append { $0.files.append(copied) }
             }
             return
         }
 
-        for type in [UTType.image, UTType.movie, UTType.fileURL, UTType.data] {
-            if provider.hasItemConformingToTypeIdentifier(type.identifier) {
-                group.enter()
-                provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { [weak self] url, _ in
-                    defer { self?.group.leave() }
-                    guard let url, let copied = self?.copyIntoGroup(url) else { return }
-                    self?.append { $0.files.append(copied) }
+        // Web links (Safari tabs and friends).
+        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+            group.enter()
+            provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self] item, _ in
+                defer { self?.group.leave() }
+                guard let self else { return }
+                if let url = item as? URL {
+                    if url.isFileURL, let copied = self.copyIntoGroup(url) {
+                        self.append { $0.files.append(copied) }
+                    } else if !url.isFileURL {
+                        self.append { $0.urls.append(url.absoluteString) }
+                    }
+                } else if let data = item as? Data, let string = String(data: data, encoding: .utf8) {
+                    self.append { $0.urls.append(string) }
                 }
-                return
             }
+            return
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
@@ -85,6 +107,19 @@ final class ShareViewController: UIViewController {
                 }
             }
             return
+        }
+
+        // Anything else we can still pull a file out of.
+        loadAsFile(provider, type: .data)
+    }
+
+    private func loadAsFile(_ provider: NSItemProvider, type: UTType) {
+        guard provider.hasItemConformingToTypeIdentifier(type.identifier) else { return }
+        group.enter()
+        provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { [weak self] url, _ in
+            defer { self?.group.leave() }
+            guard let url, let copied = self?.copyIntoGroup(url) else { return }
+            self?.append { $0.files.append(copied) }
         }
     }
 
