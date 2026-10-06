@@ -30,7 +30,7 @@ jobs:
           path: |
             build/SourcePackages
             build/Build
-          key: sim-${{ steps.xcode.outputs.xckey }}-${{ hashFiles('KDE Connect.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'KDE Connect.xcodeproj/project.pbxproj', 'Packages/**') }}
+          key: sim-${{ steps.xcode.outputs.xckey }}-${{ hashFiles('KDE Connect/**', 'KDE Connect.xcodeproj/**', 'Packages/**') }}
           restore-keys: |
             sim-${{ steps.xcode.outputs.xckey }}-
 
@@ -67,7 +67,7 @@ jobs:
           path: |
             build/SourcePackages
             build/Build
-          key: device-${{ steps.xcode.outputs.xckey }}-${{ hashFiles('KDE Connect.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'KDE Connect.xcodeproj/project.pbxproj', 'Packages/**') }}
+          key: device-${{ steps.xcode.outputs.xckey }}-${{ hashFiles('KDE Connect/**', 'KDE Connect.xcodeproj/**', 'Packages/**') }}
           restore-keys: |
             device-${{ steps.xcode.outputs.xckey }}-
 
