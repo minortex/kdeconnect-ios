@@ -1,8 +1,10 @@
 import UIKit
 import UniformTypeIdentifiers
-import OSLog
 
-private let log = Logger(subsystem: "org.kde.kdeconnect.share", category: "ShareExtension")
+// NSLog (unlike os_log) always reaches the device syslog, which is what we can
+// read from a Linux host over usbmuxd while debugging.
+private func logInfo(_ message: String) { NSLog("KDEConnectShare v3: %@", message) }
+private func logError(_ message: String) { NSLog("KDEConnectShare v3 ERROR: %@", message) }
 
 private struct SharedDevice {
     let id: String
@@ -141,7 +143,7 @@ final class ShareViewController: UIViewController {
         defer { if accessed { source.stopAccessingSecurityScopedResource() } }
 
         guard let container = groupContainerURL() else {
-            log.error("no app group container available")
+            logError("no app group container available")
             return nil
         }
         let incoming = container.appendingPathComponent("Incoming", isDirectory: true)
@@ -152,10 +154,10 @@ final class ShareViewController: UIViewController {
         do {
             try FileManager.default.copyItem(at: source, to: destination)
         } catch {
-            log.error("copy failed for \(source.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            logError("copy failed for \(source.lastPathComponent): \(error.localizedDescription)")
             return nil
         }
-        log.info("copied \(name, privacy: .public)")
+        logInfo("copied \(name)")
         return name
     }
 
@@ -163,7 +165,7 @@ final class ShareViewController: UIViewController {
     /// list is mirrored into the app group by the main app.
     private func chooseDeviceAndHandOff() {
         let devices = loadSharedDevices()
-        log.info("collected \(self.files.count) file(s), \(self.texts.count) text(s), \(self.urls.count) url(s); \(devices.count) connected device(s)")
+        logInfo("collected \(self.files.count) file(s), \(self.texts.count) text(s), \(self.urls.count) url(s); \(devices.count) connected device(s)")
         guard devices.count > 1 else {
             handOff(deviceID: devices.first?.id)
             return
@@ -184,7 +186,7 @@ final class ShareViewController: UIViewController {
     }
 
     private func handOff(deviceID: String?) {
-        log.info("handing off to \(deviceID ?? "any", privacy: .public)")
+        logInfo("handing off to \(deviceID ?? "any")")
         writeManifest(deviceID: deviceID)
         postDarwinNotification()
 
@@ -194,10 +196,10 @@ final class ShareViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
             if self.manifestStillPending() {
-                log.info("manifest still pending after 1.5s, launching app")
+                logInfo("manifest still pending after 1.5s, launching app")
                 self.openContainingApp()
             } else {
-                log.info("main app consumed the manifest")
+                logInfo("main app consumed the manifest")
             }
             self.finish()
         }
