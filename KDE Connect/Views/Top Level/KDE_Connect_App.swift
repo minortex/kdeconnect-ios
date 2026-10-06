@@ -64,6 +64,7 @@ import SwiftUI
                     }
 #endif
                     backgroundService.startDiscovery()
+                    ClipboardSync.shared.start()
                     motionManager.gyroUpdateInterval = 0.025
                     
                     UIApplication.shared.isIdleTimerDisabled = true
