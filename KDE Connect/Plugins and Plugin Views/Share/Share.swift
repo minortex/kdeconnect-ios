@@ -496,6 +496,8 @@ extension PHPhotoLibrary {
     private static let darwinNotification = "org.kde.kdeconnect.pending-share"
 
     private var observing = false
+    private var devicesTimer: Timer?
+    private var lastPublishedDevices: Data?
     private let logger = Logger()
 
     private override init() {
@@ -520,9 +522,30 @@ extension PHPhotoLibrary {
             .deliverImmediately
         )
 
+        // Mirror the connected device list so the Share Extension can offer a
+        // picker.
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.publishDevices()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        devicesTimer = timer
+        publishDevices()
+
         // Catch anything that arrived while we were not running.
         process()
         logger.info("Pending share handler started")
+    }
+
+    private func publishDevices() {
+        guard let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
+        let devices: [[String: String]] = backgroundService.devices.map { id, device in
+            ["id": id, "name": device._deviceInfo.name]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: devices),
+              data != lastPublishedDevices else { return }
+        lastPublishedDevices = data
+        try? data.write(to: container.appendingPathComponent("devices.json"), options: .atomic)
     }
 
     @objc func process() {
@@ -540,8 +563,10 @@ extension PHPhotoLibrary {
             .map { incoming.appendingPathComponent($0) }
         let texts = json["texts"] as? [String] ?? []
         let urls = json["urls"] as? [String] ?? []
+        let targetDeviceID = json["device"] as? String
 
-        for device in backgroundService.devices.values {
+        for (id, device) in backgroundService.devices {
+            if let targetDeviceID, id != targetDeviceID { continue }
             guard device._pluginsEnableStatus[.share]?.boolValue == true,
                   let share = device._plugins[.share] as? Share else { continue }
             if !fileURLs.isEmpty {

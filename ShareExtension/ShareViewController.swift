@@ -1,6 +1,11 @@
 import UIKit
 import UniformTypeIdentifiers
 
+private struct SharedDevice {
+    let id: String
+    let name: String
+}
+
 /// Share sheet entry point. It never talks to the network itself; it just
 /// copies whatever was shared into the shared app-group container and then
 /// nudges the main app (which keeps a live connection) to send it.
@@ -41,7 +46,7 @@ final class ShareViewController: UIViewController {
         }
 
         group.notify(queue: .main) { [weak self] in
-            self?.handOff()
+            self?.chooseDeviceAndHandOff()
         }
     }
 
@@ -106,19 +111,69 @@ final class ShareViewController: UIViewController {
         return name
     }
 
-    private func handOff() {
-        writeManifest()
-        postDarwinNotification()
-        openContainingApp()
-        finish()
+    /// Ask which device to send to when more than one is connected. The device
+    /// list is mirrored into the app group by the main app.
+    private func chooseDeviceAndHandOff() {
+        let devices = loadSharedDevices()
+        guard devices.count > 1 else {
+            handOff(deviceID: devices.first?.id)
+            return
+        }
+
+        let alert = UIAlertController(title: "Send with KDE Connect",
+                                      message: "Choose a device",
+                                      preferredStyle: .alert)
+        for device in devices {
+            alert.addAction(UIAlertAction(title: device.name, style: .default) { [weak self] _ in
+                self?.handOff(deviceID: device.id)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            self?.finish()
+        })
+        present(alert, animated: true)
     }
 
-    private func writeManifest() {
+    private func handOff(deviceID: String?) {
+        writeManifest(deviceID: deviceID)
+        postDarwinNotification()
+
+        // Give the (backgrounded) main app a moment to pick this up. Only force
+        // launching the app when nothing consumed the manifest, so a live app
+        // does not yank the user into the foreground for nothing.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self else { return }
+            if self.manifestStillPending() {
+                self.openContainingApp()
+            }
+            self.finish()
+        }
+    }
+
+    private func writeManifest(deviceID: String?) {
         guard let container = groupContainerURL() else { return }
-        let manifest: [String: Any] = ["files": files, "texts": texts, "urls": urls]
+        var manifest: [String: Any] = ["files": files, "texts": texts, "urls": urls]
+        if let deviceID { manifest["device"] = deviceID }
         let destination = container.appendingPathComponent(Self.manifestName)
         if let data = try? JSONSerialization.data(withJSONObject: manifest) {
             try? data.write(to: destination, options: .atomic)
+        }
+    }
+
+    private func manifestStillPending() -> Bool {
+        guard let container = groupContainerURL() else { return true }
+        return FileManager.default.fileExists(
+            atPath: container.appendingPathComponent(Self.manifestName).path)
+    }
+
+    private func loadSharedDevices() -> [SharedDevice] {
+        guard let container = groupContainerURL(),
+              let data = try? Data(contentsOf: container.appendingPathComponent("devices.json")),
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: String]]
+        else { return [] }
+        return raw.compactMap { entry in
+            guard let id = entry["id"], let name = entry["name"] else { return nil }
+            return SharedDevice(id: id, name: name)
         }
     }
 
