@@ -539,8 +539,11 @@ extension PHPhotoLibrary {
     private func publishDevices() {
         guard let container = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
-        let devices: [[String: String]] = backgroundService.devices.map { id, device in
-            ["id": id, "name": device._deviceInfo.name]
+        // Only offer devices that are actually reachable right now, not every
+        // remembered/pairing device.
+        let connected = backgroundService.getDevicesLists()["connected"] ?? [:]
+        let devices: [[String: String]] = connected.map { id, name in
+            ["id": id, "name": name]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: devices),
               data != lastPublishedDevices else { return }
