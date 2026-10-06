@@ -86,6 +86,18 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
+      - name: Fakesign with TrollStore entitlements (ldid)
+        run: |
+          set -euo pipefail
+          brew install ldid
+          APP='build/Build/Products/Release-iphoneos/KDE Connect.app'
+          BIN="$APP/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+          ldid -S.github/entitlements/trollstore.entitlements "$BIN"
+          echo "== embedded entitlements =="
+          ldid -e "$BIN" | tee /tmp/ents.plist
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.multicast' /tmp/ents.plist
+          /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' /tmp/ents.plist
+
       - name: Verify it can run on iOS 17
         run: |
           APP='build/Build/Products/Release-iphoneos/KDE Connect.app'

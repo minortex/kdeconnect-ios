@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Keep the same identity KDE ships with, so the hardcoded
+	     keychain access group "5433B4KXM8.org.kde.kdeconnect" resolves
+	     and the device UUID persists across launches (pairing survives). -->
+	<key>application-identifier</key>
+	<string>5433B4KXM8.org.kde.kdeconnect</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>5433B4KXM8</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>5433B4KXM8.org.kde.kdeconnect</string>
+	</array>
+	<!-- Required for LAN discovery (mDNS / multicast) on iOS 14+. -->
+	<key>com.apple.developer.networking.multicast</key>
+	<true/>
+	<key>com.apple.developer.device-information.user-assigned-device-name</key>
+	<true/>
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+	<!-- TrollStore: run as a platform app. -->
+	<key>platform-application</key>
+	<true/>
+	<key>get-task-allow</key>
+	<true/>
+</dict>
+</plist>
