@@ -1,11 +1,6 @@
 import UIKit
 import UniformTypeIdentifiers
 
-// NSLog (unlike os_log) always reaches the device syslog, which is what we can
-// read from a Linux host over usbmuxd while debugging.
-private func logInfo(_ message: String) { NSLog("KDEConnectShare v3: %@", message) }
-private func logError(_ message: String) { NSLog("KDEConnectShare v3 ERROR: %@", message) }
-
 private struct SharedDevice {
     let id: String
     let name: String
@@ -31,9 +26,6 @@ final class ShareViewController: UIViewController {
     private var files: [String] = []
     private var texts: [String] = []
     private var urls: [String] = []
-    /// Mirrored into the manifest so the main app (whose logs we *can* read)
-    /// can report what the extension saw.
-    private var diagnostics: [String] = []
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -44,18 +36,14 @@ final class ShareViewController: UIViewController {
 
     private func collectItems() {
         guard let items = extensionContext?.inputItems as? [NSExtensionItem] else {
-            diagnostics.append("no inputItems")
             return finish()
         }
         let providers = items.flatMap { $0.attachments ?? [] }
         guard !providers.isEmpty else {
-            diagnostics.append("no attachments")
             return finish()
         }
 
-        diagnostics.append("providers=\(providers.count)")
-        for (index, provider) in providers.enumerated() {
-            diagnostics.append("p\(index) types=[\(provider.registeredTypeIdentifiers.joined(separator: ","))]")
+        for provider in providers {
             load(provider)
         }
 
@@ -68,7 +56,6 @@ final class ShareViewController: UIViewController {
         // Photos / videos: ask for a real file on disk.
         for type in [UTType.image, UTType.movie] {
             if provider.hasItemConformingToTypeIdentifier(type.identifier) {
-                diagnostics.append("p: image/movie \(type.identifier)")
                 loadAsFile(provider, type: type)
                 return
             }
@@ -78,7 +65,6 @@ final class ShareViewController: UIViewController {
         // check: a file URL also conforms to `public.url`, and treating it as a
         // link drops the file entirely.
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            diagnostics.append("p: file-url")
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] item, _ in
                 defer { self?.group.leave() }
@@ -97,7 +83,6 @@ final class ShareViewController: UIViewController {
 
         // Web links (Safari tabs and friends).
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-            diagnostics.append("p: url")
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self] item, _ in
                 defer { self?.group.leave() }
@@ -116,7 +101,6 @@ final class ShareViewController: UIViewController {
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
-            diagnostics.append("p: text")
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { [weak self] item, _ in
                 defer { self?.group.leave() }
@@ -128,7 +112,6 @@ final class ShareViewController: UIViewController {
         }
 
         // Anything else we can still pull a file out of.
-        diagnostics.append("p: fallback data")
         loadAsFile(provider, type: .data)
     }
 
@@ -156,11 +139,7 @@ final class ShareViewController: UIViewController {
         let accessed = source.startAccessingSecurityScopedResource()
         defer { if accessed { source.stopAccessingSecurityScopedResource() } }
 
-        guard let container = groupContainerURL() else {
-            logError("no app group container available")
-            append { $0.diagnostics.append("no app group container") }
-            return nil
-        }
+        guard let container = groupContainerURL() else { return nil }
         // Every share gets its own folder so identical names cannot collide,
         // while the file itself keeps its original (meaningful) name.
         let folderName = UUID().uuidString
@@ -175,23 +154,17 @@ final class ShareViewController: UIViewController {
         do {
             try FileManager.default.copyItem(at: source, to: destination)
         } catch {
-            logError("copy failed for \(source.lastPathComponent): \(error.localizedDescription)")
-            append { $0.diagnostics.append("copyFailed \(source.lastPathComponent): \(error.localizedDescription)") }
             return nil
         }
-        let relative = "\(folderName)/\(name)"
-        logInfo("copied \(relative)")
-        append { $0.diagnostics.append("copied \(relative)") }
-        return relative
+        return "\(folderName)/\(name)"
     }
 
     /// Ask which device to send to when more than one is connected. The device
     /// list is mirrored into the app group by the main app.
     private func chooseDeviceAndHandOff() {
         let devices = loadSharedDevices()
-        logInfo("collected \(self.files.count) file(s), \(self.texts.count) text(s), \(self.urls.count) url(s); \(devices.count) connected device(s)")
         if files.isEmpty && texts.isEmpty && urls.isEmpty {
-            presentDiagnostics("KDE Connect: nothing to send")
+            presentError("There is nothing to send.")
             return
         }
         guard devices.count > 1 else {
@@ -214,9 +187,8 @@ final class ShareViewController: UIViewController {
     }
 
     private func handOff(deviceID: String?) {
-        logInfo("handing off to \(deviceID ?? "any")")
         guard writeManifest(deviceID: deviceID) else {
-            presentDiagnostics("KDE Connect could not prepare the share")
+            presentError("KDE Connect could not prepare the share.")
             return
         }
         postDarwinNotification()
@@ -227,10 +199,7 @@ final class ShareViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
             if self.manifestStillPending() {
-                logInfo("manifest still pending after 1.5s, launching app")
                 self.openContainingApp()
-            } else {
-                logInfo("main app consumed the manifest")
             }
             self.finish()
         }
@@ -238,30 +207,22 @@ final class ShareViewController: UIViewController {
 
     @discardableResult
     private func writeManifest(deviceID: String?) -> Bool {
-        guard let container = groupContainerURL() else {
-            diagnostics.append("writeManifest: no app group container")
-            return false
-        }
+        guard let container = groupContainerURL() else { return false }
         var manifest: [String: Any] = ["files": files, "texts": texts, "urls": urls]
-        manifest["diag"] = diagnostics
         if let deviceID { manifest["device"] = deviceID }
         let destination = container.appendingPathComponent(Self.manifestName)
-        guard let data = try? JSONSerialization.data(withJSONObject: manifest) else {
-            diagnostics.append("writeManifest: could not serialize")
-            return false
-        }
+        guard let data = try? JSONSerialization.data(withJSONObject: manifest) else { return false }
         do {
             try data.write(to: destination, options: .atomic)
         } catch {
-            diagnostics.append("writeManifest failed: \(error.localizedDescription)")
             return false
         }
         return true
     }
 
-    private func presentDiagnostics(_ title: String) {
-        let alert = UIAlertController(title: title,
-                                      message: diagnostics.joined(separator: "\n"),
+    private func presentError(_ message: String) {
+        let alert = UIAlertController(title: "KDE Connect",
+                                      message: message,
                                       preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
             self?.finish()

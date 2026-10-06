@@ -556,10 +556,7 @@ extension PHPhotoLibrary {
             .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
         let manifestURL = container.appendingPathComponent(Self.manifestName)
         guard let data = try? Data(contentsOf: manifestURL),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            logger.debug("No pending share manifest")
-            return
-        }
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
         // Consume the manifest so it is only handled once.
         try? FileManager.default.removeItem(at: manifestURL)
@@ -570,9 +567,6 @@ extension PHPhotoLibrary {
         let texts = json["texts"] as? [String] ?? []
         let urls = json["urls"] as? [String] ?? []
         let targetDeviceID = json["device"] as? String
-        if let diagnostics = json["diag"] as? [String] {
-            logger.info("Share extension diagnostics: \(diagnostics.joined(separator: " | "), privacy: .public)")
-        }
 
         for (id, device) in backgroundService.devices {
             if let targetDeviceID, id != targetDeviceID { continue }
