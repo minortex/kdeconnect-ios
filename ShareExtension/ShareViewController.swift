@@ -89,7 +89,7 @@ final class ShareViewController: UIViewController {
                 } else if let data = item as? Data {
                     source = URL(dataRepresentation: data, relativeTo: nil)
                 }
-                guard let source, let copied = self.copyIntoGroup(source) else { return }
+                guard let source, let copied = self.copyIntoGroup(source, suggestedName: source.lastPathComponent) else { return }
                 self.append { $0.files.append(copied) }
             }
             return
@@ -103,7 +103,7 @@ final class ShareViewController: UIViewController {
                 defer { self?.group.leave() }
                 guard let self else { return }
                 if let url = item as? URL {
-                    if url.isFileURL, let copied = self.copyIntoGroup(url) {
+                    if url.isFileURL, let copied = self.copyIntoGroup(url, suggestedName: url.lastPathComponent) {
                         self.append { $0.files.append(copied) }
                     } else if !url.isFileURL {
                         self.append { $0.urls.append(url.absoluteString) }
@@ -137,7 +137,7 @@ final class ShareViewController: UIViewController {
         group.enter()
         provider.loadFileRepresentation(forTypeIdentifier: type.identifier) { [weak self] url, _ in
             defer { self?.group.leave() }
-            guard let url, let copied = self?.copyIntoGroup(url) else { return }
+            guard let url, let copied = self?.copyIntoGroup(url, suggestedName: provider.suggestedName) else { return }
             self?.append { $0.files.append(copied) }
         }
     }
@@ -150,7 +150,7 @@ final class ShareViewController: UIViewController {
 
     // MARK: - Handing off
 
-    private func copyIntoGroup(_ source: URL) -> String? {
+    private func copyIntoGroup(_ source: URL, suggestedName: String?) -> String? {
         // Files shared from the Files app / other providers are security scoped
         // and cannot be read without asking for access first.
         let accessed = source.startAccessingSecurityScopedResource()
@@ -161,11 +161,17 @@ final class ShareViewController: UIViewController {
             append { $0.diagnostics.append("no app group container") }
             return nil
         }
-        let incoming = container.appendingPathComponent("Incoming", isDirectory: true)
-        try? FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
+        // Every share gets its own folder so identical names cannot collide,
+        // while the file itself keeps its original (meaningful) name.
+        let folderName = UUID().uuidString
+        let folder = container.appendingPathComponent("Incoming/\(folderName)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
-        let name = "\(UUID().uuidString).\(source.pathExtension)"
-        let destination = incoming.appendingPathComponent(name)
+        var name = (suggestedName?.isEmpty == false ? suggestedName! : source.lastPathComponent)
+        if URL(fileURLWithPath: name).pathExtension.isEmpty, !source.pathExtension.isEmpty {
+            name += ".\(source.pathExtension)"
+        }
+        let destination = folder.appendingPathComponent(name)
         do {
             try FileManager.default.copyItem(at: source, to: destination)
         } catch {
@@ -173,9 +179,10 @@ final class ShareViewController: UIViewController {
             append { $0.diagnostics.append("copyFailed \(source.lastPathComponent): \(error.localizedDescription)") }
             return nil
         }
-        logInfo("copied \(name)")
-        append { $0.diagnostics.append("copied \(name)") }
-        return name
+        let relative = "\(folderName)/\(name)"
+        logInfo("copied \(relative)")
+        append { $0.diagnostics.append("copied \(relative)") }
+        return relative
     }
 
     /// Ask which device to send to when more than one is connected. The device
