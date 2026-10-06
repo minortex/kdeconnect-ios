@@ -570,6 +570,9 @@ extension PHPhotoLibrary {
         let texts = json["texts"] as? [String] ?? []
         let urls = json["urls"] as? [String] ?? []
         let targetDeviceID = json["device"] as? String
+        if let diagnostics = json["diag"] as? [String] {
+            logger.info("Share extension diagnostics: \(diagnostics.joined(separator: " | "), privacy: .public)")
+        }
 
         for (id, device) in backgroundService.devices {
             if let targetDeviceID, id != targetDeviceID { continue }

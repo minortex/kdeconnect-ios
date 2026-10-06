@@ -31,6 +31,9 @@ final class ShareViewController: UIViewController {
     private var files: [String] = []
     private var texts: [String] = []
     private var urls: [String] = []
+    /// Mirrored into the manifest so the main app (whose logs we *can* read)
+    /// can report what the extension saw.
+    private var diagnostics: [String] = []
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -41,12 +44,18 @@ final class ShareViewController: UIViewController {
 
     private func collectItems() {
         guard let items = extensionContext?.inputItems as? [NSExtensionItem] else {
+            diagnostics.append("no inputItems")
             return finish()
         }
         let providers = items.flatMap { $0.attachments ?? [] }
-        guard !providers.isEmpty else { return finish() }
+        guard !providers.isEmpty else {
+            diagnostics.append("no attachments")
+            return finish()
+        }
 
-        for provider in providers {
+        diagnostics.append("providers=\(providers.count)")
+        for (index, provider) in providers.enumerated() {
+            diagnostics.append("p\(index) types=[\(provider.registeredTypeIdentifiers.joined(separator: ","))]")
             load(provider)
         }
 
@@ -59,6 +68,7 @@ final class ShareViewController: UIViewController {
         // Photos / videos: ask for a real file on disk.
         for type in [UTType.image, UTType.movie] {
             if provider.hasItemConformingToTypeIdentifier(type.identifier) {
+                diagnostics.append("p: image/movie \(type.identifier)")
                 loadAsFile(provider, type: type)
                 return
             }
@@ -68,6 +78,7 @@ final class ShareViewController: UIViewController {
         // check: a file URL also conforms to `public.url`, and treating it as a
         // link drops the file entirely.
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            diagnostics.append("p: file-url")
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] item, _ in
                 defer { self?.group.leave() }
@@ -86,6 +97,7 @@ final class ShareViewController: UIViewController {
 
         // Web links (Safari tabs and friends).
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+            diagnostics.append("p: url")
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self] item, _ in
                 defer { self?.group.leave() }
@@ -104,6 +116,7 @@ final class ShareViewController: UIViewController {
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+            diagnostics.append("p: text")
             group.enter()
             provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { [weak self] item, _ in
                 defer { self?.group.leave() }
@@ -115,6 +128,7 @@ final class ShareViewController: UIViewController {
         }
 
         // Anything else we can still pull a file out of.
+        diagnostics.append("p: fallback data")
         loadAsFile(provider, type: .data)
     }
 
@@ -144,6 +158,7 @@ final class ShareViewController: UIViewController {
 
         guard let container = groupContainerURL() else {
             logError("no app group container available")
+            append { $0.diagnostics.append("no app group container") }
             return nil
         }
         let incoming = container.appendingPathComponent("Incoming", isDirectory: true)
@@ -155,9 +170,11 @@ final class ShareViewController: UIViewController {
             try FileManager.default.copyItem(at: source, to: destination)
         } catch {
             logError("copy failed for \(source.lastPathComponent): \(error.localizedDescription)")
+            append { $0.diagnostics.append("copyFailed \(source.lastPathComponent): \(error.localizedDescription)") }
             return nil
         }
         logInfo("copied \(name)")
+        append { $0.diagnostics.append("copied \(name)") }
         return name
     }
 
@@ -208,6 +225,7 @@ final class ShareViewController: UIViewController {
     private func writeManifest(deviceID: String?) {
         guard let container = groupContainerURL() else { return }
         var manifest: [String: Any] = ["files": files, "texts": texts, "urls": urls]
+        manifest["diag"] = diagnostics
         if let deviceID { manifest["device"] = deviceID }
         let destination = container.appendingPathComponent(Self.manifestName)
         if let data = try? JSONSerialization.data(withJSONObject: manifest) {
