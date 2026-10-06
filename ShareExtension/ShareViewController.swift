@@ -183,6 +183,10 @@ final class ShareViewController: UIViewController {
     private func chooseDeviceAndHandOff() {
         let devices = loadSharedDevices()
         logInfo("collected \(self.files.count) file(s), \(self.texts.count) text(s), \(self.urls.count) url(s); \(devices.count) connected device(s)")
+        if files.isEmpty && texts.isEmpty && urls.isEmpty {
+            presentDiagnostics("KDE Connect: nothing to send")
+            return
+        }
         guard devices.count > 1 else {
             handOff(deviceID: devices.first?.id)
             return
@@ -204,7 +208,10 @@ final class ShareViewController: UIViewController {
 
     private func handOff(deviceID: String?) {
         logInfo("handing off to \(deviceID ?? "any")")
-        writeManifest(deviceID: deviceID)
+        guard writeManifest(deviceID: deviceID) else {
+            presentDiagnostics("KDE Connect could not prepare the share")
+            return
+        }
         postDarwinNotification()
 
         // Give the (backgrounded) main app a moment to pick this up. Only force
@@ -222,15 +229,37 @@ final class ShareViewController: UIViewController {
         }
     }
 
-    private func writeManifest(deviceID: String?) {
-        guard let container = groupContainerURL() else { return }
+    @discardableResult
+    private func writeManifest(deviceID: String?) -> Bool {
+        guard let container = groupContainerURL() else {
+            diagnostics.append("writeManifest: no app group container")
+            return false
+        }
         var manifest: [String: Any] = ["files": files, "texts": texts, "urls": urls]
         manifest["diag"] = diagnostics
         if let deviceID { manifest["device"] = deviceID }
         let destination = container.appendingPathComponent(Self.manifestName)
-        if let data = try? JSONSerialization.data(withJSONObject: manifest) {
-            try? data.write(to: destination, options: .atomic)
+        guard let data = try? JSONSerialization.data(withJSONObject: manifest) else {
+            diagnostics.append("writeManifest: could not serialize")
+            return false
         }
+        do {
+            try data.write(to: destination, options: .atomic)
+        } catch {
+            diagnostics.append("writeManifest failed: \(error.localizedDescription)")
+            return false
+        }
+        return true
+    }
+
+    private func presentDiagnostics(_ title: String) {
+        let alert = UIAlertController(title: title,
+                                      message: diagnostics.joined(separator: "\n"),
+                                      preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            self?.finish()
+        })
+        present(alert, animated: true)
     }
 
     private func manifestStillPending() -> Bool {
