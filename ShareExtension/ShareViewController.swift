@@ -1,5 +1,8 @@
 import UIKit
 import UniformTypeIdentifiers
+import OSLog
+
+private let log = Logger(subsystem: "org.kde.kdeconnect.share", category: "ShareExtension")
 
 private struct SharedDevice {
     let id: String
@@ -132,7 +135,15 @@ final class ShareViewController: UIViewController {
     // MARK: - Handing off
 
     private func copyIntoGroup(_ source: URL) -> String? {
-        guard let container = groupContainerURL() else { return nil }
+        // Files shared from the Files app / other providers are security scoped
+        // and cannot be read without asking for access first.
+        let accessed = source.startAccessingSecurityScopedResource()
+        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
+
+        guard let container = groupContainerURL() else {
+            log.error("no app group container available")
+            return nil
+        }
         let incoming = container.appendingPathComponent("Incoming", isDirectory: true)
         try? FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
 
@@ -141,8 +152,10 @@ final class ShareViewController: UIViewController {
         do {
             try FileManager.default.copyItem(at: source, to: destination)
         } catch {
+            log.error("copy failed for \(source.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
+        log.info("copied \(name, privacy: .public)")
         return name
     }
 
@@ -150,6 +163,7 @@ final class ShareViewController: UIViewController {
     /// list is mirrored into the app group by the main app.
     private func chooseDeviceAndHandOff() {
         let devices = loadSharedDevices()
+        log.info("collected \(self.files.count) file(s), \(self.texts.count) text(s), \(self.urls.count) url(s); \(devices.count) connected device(s)")
         guard devices.count > 1 else {
             handOff(deviceID: devices.first?.id)
             return
@@ -170,6 +184,7 @@ final class ShareViewController: UIViewController {
     }
 
     private func handOff(deviceID: String?) {
+        log.info("handing off to \(deviceID ?? "any", privacy: .public)")
         writeManifest(deviceID: deviceID)
         postDarwinNotification()
 
@@ -179,7 +194,10 @@ final class ShareViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
             if self.manifestStillPending() {
+                log.info("manifest still pending after 1.5s, launching app")
                 self.openContainingApp()
+            } else {
+                log.info("main app consumed the manifest")
             }
             self.finish()
         }
