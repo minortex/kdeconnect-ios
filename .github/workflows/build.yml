@@ -1,0 +1,73 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    name: Build (iOS Simulator)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | head -40
+
+      - name: xcodebuild (simulator, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project 'KDE Connect.xcodeproj' \
+            -scheme 'KDE Connect' \
+            -destination 'generic/platform=iOS Simulator' \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+  device-ipa:
+    name: Unsigned device IPA
+    runs-on: macos-15
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: xcodebuild (device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project 'KDE Connect.xcodeproj' \
+            -scheme 'KDE Connect' \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package unsigned IPA
+        run: |
+          APP='build/Build/Products/Release-iphoneos/KDE Connect.app'
+          test -d "$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry kdeconnect-ios-unsigned.ipa Payload
+          ls -lh kdeconnect-ios-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kdeconnect-ios-unsigned-ipa
+          path: kdeconnect-ios-unsigned.ipa
+          if-no-files-found: error
