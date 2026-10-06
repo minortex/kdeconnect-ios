@@ -1,0 +1,26 @@
+name: KDEConnectShare
+options:
+  bundleIdPrefix: org.kde.kdeconnect
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+targets:
+  KDEConnectShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ShareViewController.swift
+    settings:
+      base:
+        PRODUCT_NAME: KDEConnectShare
+        PRODUCT_BUNDLE_IDENTIFIER: org.kde.kdeconnect.share
+        INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: ShareExtension.entitlements
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+        SKIP_INSTALL: YES

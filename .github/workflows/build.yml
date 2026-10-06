@@ -86,6 +86,31 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=""
 
+      - name: Build + embed Share Extension
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          cd ShareExtension
+          xcodegen generate
+          xcodebuild build \
+            -project KDEConnectShare.xcodeproj \
+            -scheme KDEConnectShare \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath ../share-build \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+          cd ..
+          APPEX='share-build/Build/Products/Release-iphoneos/KDEConnectShare.appex'
+          test -d "$APPEX"
+          PLUGINS='build/Build/Products/Release-iphoneos/KDE Connect.app/PlugIns'
+          mkdir -p "$PLUGINS"
+          cp -R "$APPEX" "$PLUGINS/"
+          ls -la "$PLUGINS"
+
       - name: Fakesign with TrollStore entitlements (ldid)
         run: |
           set -euo pipefail
@@ -97,6 +122,14 @@ jobs:
           ldid -e "$BIN" | tee /tmp/ents.plist
           /usr/libexec/PlistBuddy -c 'Print :com.apple.developer.networking.multicast' /tmp/ents.plist
           /usr/libexec/PlistBuddy -c 'Print :keychain-access-groups:0' /tmp/ents.plist
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' /tmp/ents.plist
+
+          EXT="$APP/PlugIns/KDEConnectShare.appex/KDEConnectShare"
+          test -f "$EXT"
+          ldid -SShareExtension/ShareExtension.entitlements "$EXT"
+          echo "== share extension entitlements =="
+          ldid -e "$EXT" | tee /tmp/ext-ents.plist
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' /tmp/ext-ents.plist
 
       - name: Verify it can run on iOS 17
         run: |

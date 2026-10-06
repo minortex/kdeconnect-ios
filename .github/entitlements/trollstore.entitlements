@@ -13,6 +13,12 @@
 	<array>
 		<string>5433B4KXM8.org.kde.kdeconnect</string>
 	</array>
+	<!-- Shared container for the Share Extension hand-off. TrollStore creates
+	     the container and registers it from this entitlement. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.5433B4KXM8.org.kde.kdeconnect</string>
+	</array>
 	<!-- Required for LAN discovery (mDNS / multicast) on iOS 14+. -->
 	<key>com.apple.developer.networking.multicast</key>
 	<true/>

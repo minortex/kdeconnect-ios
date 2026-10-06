@@ -64,6 +64,7 @@ import SwiftUI
                     }
 #endif
                     backgroundService.startDiscovery()
+                    PendingShareHandler.shared.start()
                     motionManager.gyroUpdateInterval = 0.025
                     
                     UIApplication.shared.isIdleTimerDisabled = true
@@ -89,6 +90,10 @@ import SwiftUI
                     // active `.playback` audio session (see UIBackgroundModes)
                     // stops iOS from suspending the process.
                     BackgroundKeepAlive.shared.start()
+                }
+                .onOpenURL { url in
+                    guard url.scheme == "kdeconnect" else { return }
+                    PendingShareHandler.shared.process()
                 }
                 .environmentObject(KdeConnectSettings.shared)
                 .environmentObject(connectedDevicesViewModel)

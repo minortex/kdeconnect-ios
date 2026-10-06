@@ -395,6 +395,18 @@ extension Notification.Name {
             resetTransferData()
         }
     }
+
+    @objc func sendText(_ text: String) {
+        let np = NetworkPacket(type: .share)
+        np.setObject(text, forKey: "text")
+        controlDevice.send(np, tag: Int(PACKET_TAG_SHARE))
+    }
+
+    @objc func sendURL(_ url: String) {
+        let np = NetworkPacket(type: .share)
+        np.setObject(url, forKey: "url")
+        controlDevice.send(np, tag: Int(PACKET_TAG_SHARE))
+    }
     
     private func save(_ url: URL, as filename: String, for np: NetworkPacket) async throws {
         func add(as type: PHAssetResourceType) async throws {
@@ -468,3 +480,78 @@ extension PHPhotoLibrary {
         }
     }
 }
+
+#if !os(macOS)
+/// Picks up whatever the Share Extension dropped into the shared app-group
+/// container and forwards it to every connected device.
+///
+/// It is triggered by a Darwin notification (works while the app is alive in
+/// the background) and also runs once on launch to catch anything that arrived
+/// while the app was not running.
+@objc final class PendingShareHandler: NSObject {
+    @objc static let shared = PendingShareHandler()
+
+    private static let appGroupID = "group.5433B4KXM8.org.kde.kdeconnect"
+    private static let manifestName = "pending-share.json"
+    private static let darwinNotification = "org.kde.kdeconnect.pending-share"
+
+    private var observing = false
+    private let logger = Logger()
+
+    private override init() {
+        super.init()
+    }
+
+    @objc func start() {
+        guard !observing else { return }
+        observing = true
+
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            Unmanaged.passUnretained(self).toOpaque(),
+            { _, observer, _, _, _ in
+                guard let observer else { return }
+                Unmanaged<PendingShareHandler>.fromOpaque(observer)
+                    .takeUnretainedValue()
+                    .process()
+            },
+            Self.darwinNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+
+        // Catch anything that arrived while we were not running.
+        process()
+        logger.info("Pending share handler started")
+    }
+
+    @objc func process() {
+        guard let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
+        let manifestURL = container.appendingPathComponent(Self.manifestName)
+        guard let data = try? Data(contentsOf: manifestURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+
+        // Consume the manifest so it is only handled once.
+        try? FileManager.default.removeItem(at: manifestURL)
+
+        let incoming = container.appendingPathComponent("Incoming", isDirectory: true)
+        let fileURLs = (json["files"] as? [String] ?? [])
+            .map { incoming.appendingPathComponent($0) }
+        let texts = json["texts"] as? [String] ?? []
+        let urls = json["urls"] as? [String] ?? []
+
+        for device in backgroundService.devices.values {
+            guard device._pluginsEnableStatus[.share]?.boolValue == true,
+                  let share = device._plugins[.share] as? Share else { continue }
+            if !fileURLs.isEmpty {
+                share.prepAndInitFileSend(fileURLs: fileURLs)
+            }
+            for text in texts { share.sendText(text) }
+            for url in urls { share.sendURL(url) }
+        }
+
+        logger.info("Handled pending share: \(fileURLs.count) file(s), \(texts.count) text(s), \(urls.count) url(s)")
+    }
+}
+#endif
