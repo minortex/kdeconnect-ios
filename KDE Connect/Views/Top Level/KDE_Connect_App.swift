@@ -89,8 +89,12 @@ import SwiftUI
                     // accounted for ~76% of the whole device's power draw.
                 }
                 .onOpenURL { url in
-                    guard url.scheme == "kdeconnect" else { return }
-                    PendingShareHandler.shared.process()
+                    if url.isFileURL {
+                        // "Open in KDE Connect" from Filza/Files/other apps.
+                        PendingShareHandler.shared.send(documentURL: url)
+                    } else if url.scheme == "kdeconnect" {
+                        PendingShareHandler.shared.process()
+                    }
                 }
                 .environmentObject(KdeConnectSettings.shared)
                 .environmentObject(connectedDevicesViewModel)

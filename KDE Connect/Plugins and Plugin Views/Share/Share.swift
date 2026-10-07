@@ -533,6 +533,36 @@ extension PHPhotoLibrary {
         process(attemptsRemaining: 40)
     }
 
+    /// Handles a file handed to us by another app through "Open in KDE
+    /// Connect". The file is copied into the app group and then goes through
+    /// exactly the same path as a share coming from the Share Extension.
+    @objc func send(documentURL: URL) {
+        guard let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
+
+        let accessed = documentURL.startAccessingSecurityScopedResource()
+        defer { if accessed { documentURL.stopAccessingSecurityScopedResource() } }
+
+        let folderName = UUID().uuidString
+        let folder = container.appendingPathComponent("Incoming/\(folderName)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = documentURL.lastPathComponent.isEmpty ? "shared-file" : documentURL.lastPathComponent
+        let destination = folder.appendingPathComponent(name)
+        do {
+            try FileManager.default.copyItem(at: documentURL, to: destination)
+        } catch {
+            logger.fault("Pending share: could not copy opened document: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+
+        let manifest: [String: Any] = ["files": ["\(folderName)/\(name)"], "texts": [], "urls": []]
+        let manifestURL = container.appendingPathComponent(Self.manifestName)
+        guard let data = try? JSONSerialization.data(withJSONObject: manifest) else { return }
+        try? data.write(to: manifestURL, options: .atomic)
+
+        process()
+    }
+
     /// Hands a share dropped by the Share Extension over to a connected device.
     ///
     /// The extension deliberately does not pick a device: it is a separate
