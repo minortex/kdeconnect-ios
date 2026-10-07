@@ -1,6 +1,21 @@
 Unofficial build of **KDE Connect iOS** (based on upstream `master`, just past v0.5.6) with a
-share sheet extension upstream does not have. Source and full history:
-https://github.com/minortex/kdeconnect-ios
+share sheet extension and "Open in" support upstream does not have.
+Source and full history: https://github.com/minortex/kdeconnect-ios
+
+## ⚠️ TrollStore only
+
+**This build only works when installed with TrollStore.** Re-signing it with a normal Apple
+developer certificate will not work, because it needs entitlements a regular provisioning profile
+cannot grant:
+
+- `com.apple.developer.networking.multicast` — required for KDE Connect's device discovery
+  (UDP broadcast **and** Bonjour/mDNS). Without it the app finds no devices at all, and Apple only
+  grants this one on request.
+- `com.apple.security.application-groups` / `keychain-access-groups` — the share extension talks to
+  the app through a shared app group, and the device identity lives in a keychain group prefixed
+  with KDE's team id (`5433B4KXM8`).
+
+TrollStore can grant all of these; a normal signature cannot.
 
 ## What's in it
 
@@ -15,7 +30,8 @@ https://github.com/minortex/kdeconnect-ios
 ## Requirements
 
 - iOS 15.0+ (built with the iOS 26 SDK, minimum OS is 15.0; tested on iOS 17.0)
-- **TrollStore** — the IPA is unsigned. You can also re-sign it with your own certificate.
+- **TrollStore** — the IPA is unsigned and depends on entitlements only TrollStore can grant
+  (see above).
 
 ## Install
 
