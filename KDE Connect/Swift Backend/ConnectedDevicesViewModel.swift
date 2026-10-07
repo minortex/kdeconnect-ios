@@ -73,6 +73,10 @@ extension Notification.Name {
                 self.visibleDevices = devicesListsMap["visible"]!
                 self.savedDevices = devicesListsMap["remembered"]!
             }
+#if !os(macOS)
+            // A device may have just connected; a share waiting for it can go now.
+            PendingShareHandler.shared.process()
+#endif
         }
     }
 

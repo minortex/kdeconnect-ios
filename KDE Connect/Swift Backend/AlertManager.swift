@@ -30,6 +30,8 @@ struct AlertContent {
  To add an alert use ``queueAlert(prioritize:title:content:buttons:)``.
  */
 class AlertManager: ObservableObject {
+    static let shared = AlertManager()
+
     var queue: [AlertContent] = []
     
     @Published var alertPresent: Bool = false

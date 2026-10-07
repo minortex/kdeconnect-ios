@@ -1,11 +1,6 @@
 import UIKit
 import UniformTypeIdentifiers
 
-private struct SharedDevice {
-    let id: String
-    let name: String
-}
-
 /// Share sheet entry point. It never talks to the network itself; it just
 /// copies whatever was shared into the shared app-group container and then
 /// nudges the main app (which keeps a live connection) to send it.
@@ -48,7 +43,7 @@ final class ShareViewController: UIViewController {
         }
 
         group.notify(queue: .main) { [weak self] in
-            self?.chooseDeviceAndHandOff()
+            self?.handOff()
         }
     }
 
@@ -161,33 +156,12 @@ final class ShareViewController: UIViewController {
 
     /// Ask which device to send to when more than one is connected. The device
     /// list is mirrored into the app group by the main app.
-    private func chooseDeviceAndHandOff() {
-        let devices = loadSharedDevices()
-        if files.isEmpty && texts.isEmpty && urls.isEmpty {
+    private func handOff() {
+        guard !files.isEmpty || !texts.isEmpty || !urls.isEmpty else {
             presentError("There is nothing to send.")
             return
         }
-        guard devices.count > 1 else {
-            handOff(deviceID: devices.first?.id)
-            return
-        }
-
-        let alert = UIAlertController(title: "Send with KDE Connect",
-                                      message: "Choose a device",
-                                      preferredStyle: .alert)
-        for device in devices {
-            alert.addAction(UIAlertAction(title: device.name, style: .default) { [weak self] _ in
-                self?.handOff(deviceID: device.id)
-            })
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
-            self?.finish()
-        })
-        present(alert, animated: true)
-    }
-
-    private func handOff(deviceID: String?) {
-        guard writeManifest(deviceID: deviceID) else {
+        guard writeManifest() else {
             presentError("KDE Connect could not prepare the share.")
             return
         }
@@ -206,10 +180,9 @@ final class ShareViewController: UIViewController {
     }
 
     @discardableResult
-    private func writeManifest(deviceID: String?) -> Bool {
+    private func writeManifest() -> Bool {
         guard let container = groupContainerURL() else { return false }
-        var manifest: [String: Any] = ["files": files, "texts": texts, "urls": urls]
-        if let deviceID { manifest["device"] = deviceID }
+        let manifest: [String: Any] = ["files": files, "texts": texts, "urls": urls]
         let destination = container.appendingPathComponent(Self.manifestName)
         guard let data = try? JSONSerialization.data(withJSONObject: manifest) else { return false }
         do {
@@ -234,17 +207,6 @@ final class ShareViewController: UIViewController {
         guard let container = groupContainerURL() else { return true }
         return FileManager.default.fileExists(
             atPath: container.appendingPathComponent(Self.manifestName).path)
-    }
-
-    private func loadSharedDevices() -> [SharedDevice] {
-        guard let container = groupContainerURL(),
-              let data = try? Data(contentsOf: container.appendingPathComponent("devices.json")),
-              let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: String]]
-        else { return [] }
-        return raw.compactMap { entry in
-            guard let id = entry["id"], let name = entry["name"] else { return nil }
-            return SharedDevice(id: id, name: name)
-        }
     }
 
     private func postDarwinNotification() {

@@ -15,6 +15,7 @@
 
 import Foundation
 import AVFoundation
+import SwiftUI
 #if !os(macOS)
 import UIKit
 #else
@@ -496,8 +497,7 @@ extension PHPhotoLibrary {
     private static let darwinNotification = "org.kde.kdeconnect.pending-share"
 
     private var observing = false
-    private var devicesTimer: Timer?
-    private var lastPublishedDevices: Data?
+    private var isProcessing = false
     private let logger = Logger()
 
     private override init() {
@@ -522,89 +522,115 @@ extension PHPhotoLibrary {
             .deliverImmediately
         )
 
-        // Mirror the connected device list so the Share Extension can offer a
-        // picker.
-        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.publishDevices()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        devicesTimer = timer
-        publishDevices()
-
         // Catch anything that arrived while we were not running.
         process()
         logger.info("Pending share handler started")
     }
 
-    private func publishDevices() {
-        guard let container = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
-        // Only offer devices that are actually reachable right now, not every
-        // remembered/pairing device.
-        let connected = backgroundService.getDevicesLists()["connected"] ?? [:]
-        let devices: [[String: String]] = connected.map { id, name in
-            ["id": id, "name": name]
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: devices),
-              data != lastPublishedDevices else { return }
-        lastPublishedDevices = data
-        try? data.write(to: container.appendingPathComponent("devices.json"), options: .atomic)
-    }
-
     @objc func process() {
+        guard !isProcessing else { return }
+        isProcessing = true
         process(attemptsRemaining: 40)
     }
 
-    /// Hands a share dropped by the Share Extension over to the target device.
+    /// Hands a share dropped by the Share Extension over to a connected device.
     ///
-    /// When the app was just launched by the share sheet the devices are not
-    /// connected yet, so retry for a while instead of dropping the share.
+    /// The extension deliberately does not pick a device: it is a separate
+    /// process and cannot see live connection state. The choice happens here,
+    /// where we know exactly which devices are reachable right now.
     private func process(attemptsRemaining: Int) {
         guard let container = FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
+            .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else {
+            isProcessing = false
+            return
+        }
         let manifestURL = container.appendingPathComponent(Self.manifestName)
         guard let data = try? Data(contentsOf: manifestURL),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            isProcessing = false
+            return
+        }
 
         let incoming = container.appendingPathComponent("Incoming", isDirectory: true)
         let fileURLs = (json["files"] as? [String] ?? [])
             .map { incoming.appendingPathComponent($0) }
         let texts = json["texts"] as? [String] ?? []
         let urls = json["urls"] as? [String] ?? []
-        let targetDeviceID = json["device"] as? String
 
-        logger.info("Pending share: \(backgroundService.devices.count) device(s), target=\(targetDeviceID ?? "any", privacy: .public), files=\(fileURLs.count), texts=\(texts.count), urls=\(urls.count)")
-        var handedOff = false
-        for (id, device) in backgroundService.devices {
-            if let targetDeviceID, id != targetDeviceID { continue }
-            guard device._pluginsEnableStatus[.share]?.boolValue == true,
-                  let share = device._plugins[.share] as? Share else {
-                logger.info("Pending share: device \(id, privacy: .public) not ready")
-                continue
-            }
-            if !fileURLs.isEmpty {
-                share.prepAndInitFileSend(fileURLs: fileURLs)
-            }
-            for text in texts { share.sendText(text) }
-            for url in urls { share.sendURL(url) }
-            handedOff = true
-        }
+        let connected = backgroundService.getDevicesLists()["connected"] ?? [:]
+        logger.info("Pending share: \(connected.count) connected device(s), files=\(fileURLs.count), texts=\(texts.count), urls=\(urls.count)")
 
-        guard handedOff else {
-            // No device is ready yet (the app was probably just launched from
-            // the share sheet). Keep the manifest around and try again.
-            logger.info("Pending share: nothing handed off, attempts left \(attemptsRemaining)")
-            if attemptsRemaining > 0 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.process(attemptsRemaining: attemptsRemaining - 1)
-                }
-            }
+        guard !connected.isEmpty else {
+            // Nothing reachable yet (e.g. the app was just launched by the
+            // share sheet). Keep the manifest and try again shortly.
+            retry(attemptsRemaining: attemptsRemaining)
             return
         }
 
-        // Only consume the manifest once it has actually been handed off.
+        if connected.count == 1, let deviceID = connected.keys.first {
+            guard send(deviceID: deviceID, fileURLs: fileURLs, texts: texts, urls: urls) else {
+                retry(attemptsRemaining: attemptsRemaining)
+                return
+            }
+            consume(manifestURL, fileURLs: fileURLs, texts: texts, urls: urls)
+            return
+        }
+
+        // More than one device: the user has to choose, which needs the app in
+        // the foreground. If we are not, leave the manifest alone - the Share
+        // Extension's fallback will bring us forward and we get called again.
+        guard UIApplication.shared.applicationState == .active else {
+            logger.info("Pending share: \(connected.count) devices, waiting for the app to come forward")
+            isProcessing = false
+            return
+        }
+
+        isProcessing = false
+        try? FileManager.default.removeItem(at: manifestURL)
+        presentDevicePicker(connected, fileURLs: fileURLs, texts: texts, urls: urls)
+    }
+
+    private func retry(attemptsRemaining: Int) {
+        guard attemptsRemaining > 0 else {
+            isProcessing = false
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.process(attemptsRemaining: attemptsRemaining - 1)
+        }
+    }
+
+    @discardableResult
+    private func send(deviceID: String, fileURLs: [URL], texts: [String], urls: [String]) -> Bool {
+        guard let device = backgroundService.devices[deviceID],
+              device._pluginsEnableStatus[.share]?.boolValue == true,
+              let share = device._plugins[.share] as? Share else { return false }
+        if !fileURLs.isEmpty {
+            share.prepAndInitFileSend(fileURLs: fileURLs)
+        }
+        for text in texts { share.sendText(text) }
+        for url in urls { share.sendURL(url) }
+        return true
+    }
+
+    private func consume(_ manifestURL: URL, fileURLs: [URL], texts: [String], urls: [String]) {
+        isProcessing = false
         try? FileManager.default.removeItem(at: manifestURL)
         logger.info("Handled pending share: \(fileURLs.count) file(s), \(texts.count) text(s), \(urls.count) url(s)")
+    }
+
+    private func presentDevicePicker(_ devices: [String: String],
+                                     fileURLs: [URL], texts: [String], urls: [String]) {
+        AlertManager.shared.queueAlert(prioritize: true, title: "Send with KDE Connect") {
+            Text("Choose a device")
+        } buttons: {
+            ForEach(devices.keys.sorted(), id: \.self) { deviceID in
+                Button(devices[deviceID] ?? deviceID) {
+                    self.send(deviceID: deviceID, fileURLs: fileURLs, texts: texts, urls: urls)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
 #endif
