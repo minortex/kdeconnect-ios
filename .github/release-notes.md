@@ -8,12 +8,8 @@ https://github.com/minortex/kdeconnect-ios
   photos, text and URLs**. Original file names are preserved.
 - **"Open in KDE Connect"** — it also shows up in *Open in / Open with* menus (Filza, Files, …),
   so files can be handed over without a share sheet.
-- **Device picking happens in the app**, where the live connection state is known: one connected
-  device sends silently in the background, several connected devices show an in-app picker.
-- **Background keep-alive (experimental)** — the app keeps its connection when it goes to the
-  background, using the private `UIBackgroundModes = continuous` mode (no silent audio).
-  **Do not use releases older than `v0.5.6-bg-share.2`**: they kept the audio codec powered 24/7
-  and were measured at ~76% of the entire device's power draw.
+- **Device picking happens in the app**, where the live connection state is known: with one
+  connected device it sends straight away, with several it shows an in-app picker.
 - **Clipboard, phone → desktop**: not included (kept manual, as upstream).
 
 ## Requirements
@@ -36,10 +32,11 @@ https://github.com/minortex/kdeconnect-ios
   extension uses a private-API fallback (walking the `UIResponder` chain to call `openURL:`) to
   launch it. That is a deliberate grey area; it works up to iOS 17 and is blocked from iOS 18.
   The normal path (a Darwin notification to the already-running app) does not need it.
-- The background keep-alive is experimental; its battery cost has not been measured yet. If you
-  see unusual battery drain, please report it.
-- The app must not be force-quit or background receiving stops.
-- If iOS kills the app in the background, shares are only delivered once the app is opened again.
+- Like any normal app it is suspended in the background, so it only receives while it is in the
+  foreground or freshly backgrounded. There is **no** background keep-alive: an earlier build
+  used a silent audio session for that and was measured at ~76% of the whole device's power
+  draw, so it was removed.
+- Force-quitting the app stops receiving entirely.
 
 ## License
 

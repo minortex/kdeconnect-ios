@@ -14,7 +14,6 @@
 
 #if !os(macOS)
 import UIKit
-import AVFoundation
 #else
 import UserNotifications
 #endif
@@ -75,18 +74,16 @@ import SwiftUI
                     // broadcastBatteryStatusAllDevices()
                     // requestBatteryStatusAllDevices()
 
+                    // However, non of the links are kept alive in background
                     backgroundService.refreshDiscovery()
                 }
                 .onReceive(NotificationCenter.default
                     .publisher(for: UIApplication
                         .didEnterBackgroundNotification)
                 ) { _ in
-                    // Keep the sockets alive so we can still receive clipboard and
-                    // file packets while backgrounded. `UIBackgroundModes =
-                    // continuous` is what is supposed to keep the process from
-                    // being suspended; the previous silent-audio keep-alive was
-                    // removed because it kept the audio codec powered 24/7 and
-                    // accounted for ~76% of the whole device's power draw.
+                    // Aggressively terminate the socket is the best way
+                    // to prevent weird broken pipe/invalid socket issue
+                    backgroundService.stopDiscovery()
                 }
                 .onOpenURL { url in
                     if url.isFileURL {
