@@ -175,6 +175,6 @@ jobs:
             gh release upload "$TAG" kdeconnect-ios-unsigned.ipa --clobber
           else
             gh release create "$TAG" kdeconnect-ios-unsigned.ipa \
-              --title "KDE Connect iOS (background + share sheet) ${TAG}" \
+              --title "KDE Connect iOS (share sheet, TrollStore only) ${TAG}" \
               --notes-file .github/release-notes.md
           fi
