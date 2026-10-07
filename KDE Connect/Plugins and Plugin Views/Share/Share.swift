@@ -573,11 +573,15 @@ extension PHPhotoLibrary {
         let urls = json["urls"] as? [String] ?? []
         let targetDeviceID = json["device"] as? String
 
+        logger.info("Pending share: \(backgroundService.devices.count) device(s), target=\(targetDeviceID ?? "any", privacy: .public), files=\(fileURLs.count), texts=\(texts.count), urls=\(urls.count)")
         var handedOff = false
         for (id, device) in backgroundService.devices {
             if let targetDeviceID, id != targetDeviceID { continue }
             guard device._pluginsEnableStatus[.share]?.boolValue == true,
-                  let share = device._plugins[.share] as? Share else { continue }
+                  let share = device._plugins[.share] as? Share else {
+                logger.info("Pending share: device \(id, privacy: .public) not ready")
+                continue
+            }
             if !fileURLs.isEmpty {
                 share.prepAndInitFileSend(fileURLs: fileURLs)
             }
@@ -589,6 +593,7 @@ extension PHPhotoLibrary {
         guard handedOff else {
             // No device is ready yet (the app was probably just launched from
             // the share sheet). Keep the manifest around and try again.
+            logger.info("Pending share: nothing handed off, attempts left \(attemptsRemaining)")
             if attemptsRemaining > 0 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     self?.process(attemptsRemaining: attemptsRemaining - 1)
