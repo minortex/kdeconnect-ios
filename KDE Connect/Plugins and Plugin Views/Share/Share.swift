@@ -552,14 +552,19 @@ extension PHPhotoLibrary {
     }
 
     @objc func process() {
+        process(attemptsRemaining: 40)
+    }
+
+    /// Hands a share dropped by the Share Extension over to the target device.
+    ///
+    /// When the app was just launched by the share sheet the devices are not
+    /// connected yet, so retry for a while instead of dropping the share.
+    private func process(attemptsRemaining: Int) {
         guard let container = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: Self.appGroupID) else { return }
         let manifestURL = container.appendingPathComponent(Self.manifestName)
         guard let data = try? Data(contentsOf: manifestURL),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-
-        // Consume the manifest so it is only handled once.
-        try? FileManager.default.removeItem(at: manifestURL)
 
         let incoming = container.appendingPathComponent("Incoming", isDirectory: true)
         let fileURLs = (json["files"] as? [String] ?? [])
@@ -568,6 +573,7 @@ extension PHPhotoLibrary {
         let urls = json["urls"] as? [String] ?? []
         let targetDeviceID = json["device"] as? String
 
+        var handedOff = false
         for (id, device) in backgroundService.devices {
             if let targetDeviceID, id != targetDeviceID { continue }
             guard device._pluginsEnableStatus[.share]?.boolValue == true,
@@ -577,8 +583,22 @@ extension PHPhotoLibrary {
             }
             for text in texts { share.sendText(text) }
             for url in urls { share.sendURL(url) }
+            handedOff = true
         }
 
+        guard handedOff else {
+            // No device is ready yet (the app was probably just launched from
+            // the share sheet). Keep the manifest around and try again.
+            if attemptsRemaining > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.process(attemptsRemaining: attemptsRemaining - 1)
+                }
+            }
+            return
+        }
+
+        // Only consume the manifest once it has actually been handed off.
+        try? FileManager.default.removeItem(at: manifestURL)
         logger.info("Handled pending share: \(fileURLs.count) file(s), \(texts.count) text(s), \(urls.count) url(s)")
     }
 }
