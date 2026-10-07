@@ -3,9 +3,11 @@ things upstream does not have. Source and full history: https://github.com/minor
 
 ## What's in it
 
-- **Background keep-alive** — the app no longer tears down its connection when it goes to the
-  background, so it can keep receiving files while backgrounded/locked.
-  (`UIBackgroundModes = audio` + a looping silent audio session.)
+- **Background keep-alive (experimental)** — the app no longer tears down its connection when it
+  goes to the background, so it can keep receiving files while backgrounded.
+  Uses the private `UIBackgroundModes = continuous` mode, with no silent audio.
+  **Do not use releases older than `v0.5.6-bg-share.2`**: those kept the audio codec powered 24/7
+  through a silent audio session and were measured at ~76% of the entire device's power draw.
 - **Share sheet extension** — KDE Connect now shows up in the iOS share sheet and can send
   **files, photos, text and URLs**. When more than one device is connected you get a picker with
   just the reachable ones. Original file names are preserved.
@@ -31,8 +33,9 @@ things upstream does not have. Source and full history: https://github.com/minor
   fallback (walking the `UIResponder` chain to call `openURL:`) to launch the app when it is not
   running. That is a deliberate grey area; it works up to iOS 17 and is blocked from iOS 18.
   The normal path (a Darwin notification to the already-running background app) does not need it.
-- Background keep-alive uses a silent audio session: it costs some battery, and the app must not
-  be force-quit or everything stops.
+- The background keep-alive is experimental and its cost has not been measured yet; if you see
+  unusual battery drain, please report it.
+- The app must not be force-quit or background receiving stops.
 - If iOS kills the app in the background, shares are only delivered once the app is opened again.
 
 ## License

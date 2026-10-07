@@ -70,10 +70,6 @@ import SwiftUI
                     UIApplication.shared.isIdleTimerDisabled = true
                 }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-                    // Back in the foreground we no longer need to stay alive, so
-                    // release the silent audio session again.
-                    BackgroundKeepAlive.shared.stop()
-
                     // In case the app's been chilling suspended for a long time,
                     // upon returning ask for updates to all devices's battery statuses
                     // broadcastBatteryStatusAllDevices()
@@ -86,10 +82,11 @@ import SwiftUI
                         .didEnterBackgroundNotification)
                 ) { _ in
                     // Keep the sockets alive so we can still receive clipboard and
-                    // file packets while backgrounded. Playing silence with an
-                    // active `.playback` audio session (see UIBackgroundModes)
-                    // stops iOS from suspending the process.
-                    BackgroundKeepAlive.shared.start()
+                    // file packets while backgrounded. `UIBackgroundModes =
+                    // continuous` is what is supposed to keep the process from
+                    // being suspended; the previous silent-audio keep-alive was
+                    // removed because it kept the audio codec powered 24/7 and
+                    // accounted for ~76% of the whole device's power draw.
                 }
                 .onOpenURL { url in
                     guard url.scheme == "kdeconnect" else { return }
@@ -154,61 +151,3 @@ import SwiftUI
 #endif
     }
 }
-
-#if !os(macOS)
-/// Keeps the process alive while it is in the background by looping silence
-/// through an active `.playback` audio session.
-///
-/// This is paired with `UIBackgroundModes = audio` in Info.plist. We never
-/// publish anything to `MPNowPlayingInfoCenter` and never register remote
-/// commands, so the system "Now Playing" UI should normally stay empty.
-final class BackgroundKeepAlive {
-    static let shared = BackgroundKeepAlive()
-
-    private var engine: AVAudioEngine?
-    private let logger = Logger()
-
-    private init() {}
-
-    func start() {
-        guard engine == nil else { return }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            // `.mixWithOthers` so we don't stop whatever the user is listening to.
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
-
-            guard let format = AVAudioFormat(standardFormatWithSampleRate: 44_100,
-                                             channels: 2) else { return }
-            let silence = AVAudioSourceNode { _, _, _, audioBufferList -> OSStatus in
-                let buffers = UnsafeMutableAudioBufferListPointer(audioBufferList)
-                for buffer in buffers {
-                    if let data = buffer.mData {
-                        memset(data, 0, Int(buffer.mDataByteSize))
-                    }
-                }
-                return noErr
-            }
-
-            let engine = AVAudioEngine()
-            engine.attach(silence)
-            engine.connect(silence, to: engine.mainMixerNode, format: format)
-            try engine.start()
-
-            self.engine = engine
-            logger.info("Background keep-alive audio session started")
-        } catch {
-            logger.fault("Failed to start background keep-alive: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-
-    func stop() {
-        guard engine != nil else { return }
-        engine?.stop()
-        engine = nil
-        try? AVAudioSession.sharedInstance()
-            .setActive(false, options: [.notifyOthersOnDeactivation])
-        logger.info("Background keep-alive audio session stopped")
-    }
-}
-#endif
