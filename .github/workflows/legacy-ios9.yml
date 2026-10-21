@@ -66,8 +66,11 @@ jobs:
           vtool -show-build "$BIN" | tee /tmp/legacy-build.txt
           lipo -info "$BIN"
           minos=$(vtool -show-build "$BIN" | awk '/minos/ {print $2; exit}')
+          if [ -z "$minos" ]; then
+            minos=$(vtool -show-build "$BIN" | awk '/version/ && $1 == "version" {print $2; exit}')
+          fi
           echo "MinimumOS=$minos"
-          test -n "$minos"
+          test "$minos" = "9.0"
 
       - name: Package unsigned IPA
         working-directory: Legacy
