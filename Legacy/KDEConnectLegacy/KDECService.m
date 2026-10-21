@@ -14,6 +14,10 @@
 #import "GCDAsyncSocket.h"
 #import "GCDAsyncUdpSocket.h"
 
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+
 NSString *const KDECServiceDevicesDidChangeNotification = @"KDECServiceDevicesDidChangeNotification";
 NSString *const KDECServicePairRequestNotification = @"KDECServicePairRequestNotification";
 NSString *const KDECServiceFileReceivedNotification = @"KDECServiceFileReceivedNotification";
@@ -84,11 +88,13 @@ static const NSInteger KDECProtocolVersion = 8;
     [self loadPairedDevices];
     [self startServer];
     if (!self.serverSocket) {
+        NSLog(@"KDEC TCP server failed");
         self.started = NO;
         return;
     }
     [self startUdp];
     if (!self.udpSocket) {
+        NSLog(@"KDEC UDP socket failed");
         [self.serverSocket disconnect];
         self.serverSocket = nil;
         self.started = NO;
@@ -144,6 +150,7 @@ static const NSInteger KDECProtocolVersion = 8;
     for (uint16_t port = KDECMinTcpPort; port <= KDECMaxTcpPort; port++) {
         if ([self.serverSocket acceptOnPort:port error:&error]) {
             self.tcpPort = port;
+            NSLog(@"KDEC TCP listening on %u", port);
             return;
         }
     }
@@ -158,13 +165,17 @@ static const NSInteger KDECProtocolVersion = 8;
     [self.udpSocket enableReusePort:YES error:&error];
     [self.udpSocket enableBroadcast:YES error:&error];
     if (![self.udpSocket bindToPort:KDECDiscoveryPort error:&error]) {
+        NSLog(@"KDEC UDP bind failed: %@", error);
         self.udpSocket = nil;
         return;
     }
     if (![self.udpSocket beginReceiving:&error]) {
+        NSLog(@"KDEC UDP receive failed: %@", error);
         [self.udpSocket close];
         self.udpSocket = nil;
+        return;
     }
+    NSLog(@"KDEC UDP listening on %d", KDECDiscoveryPort);
 }
 
 - (KDEConnectPacket *)identityPacket
@@ -189,11 +200,42 @@ static const NSInteger KDECProtocolVersion = 8;
         return;
     }
     NSData *data = [[self identityPacket] serialize];
-    [self.udpSocket sendData:data
-                      toHost:@"255.255.255.255"
-                        port:KDECDiscoveryPort
-                 withTimeout:-1
-                         tag:0];
+    NSArray<NSString *> *addresses = [self broadcastAddresses];
+    for (NSString *address in addresses) {
+        NSLog(@"KDEC broadcasting to %@:%d", address, KDECDiscoveryPort);
+        [self.udpSocket sendData:data
+                          toHost:address
+                            port:KDECDiscoveryPort
+                     withTimeout:-1
+                             tag:0];
+    }
+}
+
+- (NSArray<NSString *> *)broadcastAddresses
+{
+    NSMutableArray<NSString *> *addresses = [NSMutableArray arrayWithObject:@"255.255.255.255"];
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) != 0) {
+        return addresses;
+    }
+    for (struct ifaddrs *item = interfaces; item != NULL; item = item->ifa_next) {
+        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_INET) {
+            continue;
+        }
+        if (!(item->ifa_flags & IFF_UP) || !(item->ifa_flags & IFF_BROADCAST)) {
+            continue;
+        }
+        struct sockaddr_in *broadcast = (struct sockaddr_in *)item->ifa_broadaddr;
+        if (!broadcast) {
+            continue;
+        }
+        char text[INET_ADDRSTRLEN] = {0};
+        if (inet_ntop(AF_INET, &broadcast->sin_addr, text, sizeof(text))) {
+            [addresses addObject:[NSString stringWithUTF8String:text]];
+        }
+    }
+    freeifaddrs(interfaces);
+    return addresses;
 }
 
 - (void)connectToDevice:(KDECDeviceInfo *)device host:(NSString *)host port:(uint16_t)port
@@ -576,6 +618,7 @@ withFilterContext:(id)filterContext
     if ([packet integerForKey:@"protocolVersion"] < KDECProtocolVersion) {
         return;
     }
+    NSLog(@"KDEC received discovery from %@", [packet stringForKey:@"deviceName"]);
 
     NSString *host = nil;
     [GCDAsyncUdpSocket getHost:&host port:nil fromAddress:address];
@@ -594,6 +637,7 @@ withFilterContext:(id)filterContext
     device.host = host;
     uint16_t port = (uint16_t)[packet integerForKey:@"tcpPort"];
     device.tcpPort = port;
+    NSLog(@"KDEC discovery host=%@ port=%u", host, port);
     if (port >= KDECMinTcpPort && port <= KDECMaxTcpPort) {
         if (device.paired) {
             [self savePairedDevices];
