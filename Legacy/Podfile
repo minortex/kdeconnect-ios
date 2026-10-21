@@ -1,0 +1,15 @@
+platform :ios, '9.0'
+
+target 'KDEConnectLegacy' do
+  pod 'CocoaAsyncSocket', '~> 7.6.4'
+  pod 'OpenSSL-Classic', '~> 1.0.2'
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '9.0'
+      config.build_settings['CLANG_WARN_UNGUARDED_AVAILABILITY'] = 'NO'
+    end
+  end
+end

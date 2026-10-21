@@ -1,0 +1,5 @@
+Pods/
+KDEConnectLegacy.xcodeproj/
+KDEConnectLegacy.xcworkspace/
+Podfile.lock
+build/

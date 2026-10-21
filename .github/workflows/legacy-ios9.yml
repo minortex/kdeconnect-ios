@@ -1,0 +1,87 @@
+name: legacy-ios9
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'Legacy/**'
+      - '.github/workflows/legacy-ios9.yml'
+
+concurrency:
+  group: legacy-ios9-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned legacy IPA
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcodebuild -showsdks
+
+      - name: Install project generators
+        run: |
+          brew install xcodegen
+          pod --version || brew install cocoapods
+
+      - name: Generate workspace
+        working-directory: Legacy
+        run: |
+          xcodegen generate
+          pod install
+
+      - name: Build device app
+        working-directory: Legacy
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace KDEConnectLegacy.xcworkspace \
+            -scheme KDEConnectLegacy \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            IPHONEOS_DEPLOYMENT_TARGET=9.0 \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            ENABLE_BITCODE=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Inspect build product
+        working-directory: Legacy
+        run: |
+          set -euo pipefail
+          APP='build/Build/Products/Release-iphoneos/KDE Connect Legacy.app'
+          test -d "$APP"
+          BIN="$APP/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+          vtool -show-build "$BIN" | tee /tmp/legacy-build.txt
+          lipo -info "$BIN"
+          minos=$(vtool -show-build "$BIN" | awk '/minos/ {print $2; exit}')
+          echo "MinimumOS=$minos"
+          test -n "$minos"
+
+      - name: Package unsigned IPA
+        working-directory: Legacy
+        run: |
+          set -euo pipefail
+          APP='build/Build/Products/Release-iphoneos/KDE Connect Legacy.app'
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry kdeconnect-legacy-unsigned.ipa Payload
+          ls -lh kdeconnect-legacy-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kdeconnect-legacy-unsigned-ipa
+          path: Legacy/kdeconnect-legacy-unsigned.ipa
+          if-no-files-found: error

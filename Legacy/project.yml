@@ -1,0 +1,30 @@
+name: KDEConnectLegacy
+options:
+  bundleIdPrefix: org.kde.kdeconnect
+  deploymentTarget:
+    iOS: "9.0"
+  createIntermediateGroups: true
+targets:
+  KDEConnectLegacy:
+    type: application
+    platform: iOS
+    sources:
+      - path: KDEConnectLegacy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.kde.kdeconnect.legacy
+        PRODUCT_NAME: KDE Connect Legacy
+        INFOPLIST_FILE: KDEConnectLegacy/Info.plist
+        IPHONEOS_DEPLOYMENT_TARGET: "9.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CLANG_ENABLE_OBJC_ARC: YES
+        CLANG_ENABLE_MODULES: YES
+        GCC_C_LANGUAGE_STANDARD: gnu11
+        CLANG_WARN_UNGUARDED_AVAILABILITY: NO
+        ARCHS: "$(ARCHS_STANDARD)"
+        VALID_ARCHS: "armv7 arm64 i386 x86_64"
+    dependencies:
+      - sdk: UIKit.framework
+      - sdk: Foundation.framework
+      - sdk: Security.framework
+      - sdk: CFNetwork.framework
