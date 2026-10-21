@@ -2,7 +2,7 @@ platform :ios, '9.0'
 
 target 'KDEConnectLegacy' do
   pod 'CocoaAsyncSocket', '~> 7.6.4'
-  pod 'OpenSSL-Classic', '~> 1.0.2'
+  pod 'OpenSSL-Universal-1.0.2', '~> 1.0.2'
 end
 
 post_install do |installer|

@@ -28,7 +28,7 @@ pod install
 open KDEConnectLegacy.xcworkspace
 ```
 
-`OpenSSL-Classic` is used only to create the self-signed client certificate
+`OpenSSL-Universal-1.0.2` is used only to create the self-signed client certificate
 on iOS 9. It is an unmaintained dependency and should stay isolated to this
 legacy target.
 
