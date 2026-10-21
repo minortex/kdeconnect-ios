@@ -12,6 +12,7 @@
 #import "KDECPayloadConnection.h"
 
 #import "GCDAsyncSocket.h"
+#import <objc/runtime.h>
 
 static const long KDECTransportTagPacket = 1;
 static const uint16_t KDECPayloadPort = 1739;
